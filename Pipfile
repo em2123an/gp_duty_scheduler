@@ -5,8 +5,11 @@ name = "pypi"
 
 [packages]
 ortools = "*"
+textual = "*"
+textual-dev = "*"
 
 [dev-packages]
+ipykernel = "*"
 
 [requires]
 python_version = "3.11"
