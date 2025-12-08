@@ -3,7 +3,6 @@ import sys
 import csv
 import queue
 from threading import Event
-from check_values import check_values_csv
 
 def main(
         d_num_gps, #total number of gps
@@ -11,9 +10,9 @@ def main(
         d_first_day_index, #first day index starting from monday as 0
         d_freedays_after_duty, #freedays to have after each duty
         d_is_first_day_psych, #is the first day psych or not (boolean)
+        d_prev_duty_shift, #dict values for all basic wards 
+        old_duty_set_shift, #dict values for all basic wards 
         d_max_min, #maximum minute to run the search 
-        d_prev_duty_shift=[], #dict values for all basic wards 
-        d_prev_duty_shift_new = None, #dict values for all basic wards 
         d_holiday_dates = [], #date of holidays
         msg_queue = queue.Queue(), #to be used to get messages on background when used with GUI (like tkinter)
         stop_event = Event(), #to be used to stop search from background when used with GUI (like tkinter)
@@ -36,7 +35,6 @@ def main(
     #basic constants
     days_of_week=['mon','tue','wed','thr','fri','sat','sun']
     all_wards = ['W4M','W4F','W9','MDR','IMW']
-    all_possible_wards = all_wards.copy()
     hrs_per_week = {
         days_of_week[0]: int(16), days_of_week[1]: int(16), days_of_week[2]: int(16),days_of_week[3]: int(16),
         days_of_week[4]: int(17),
@@ -47,34 +45,30 @@ def main(
     duty_types = ['actual','signed']
     #Basic setups
     #previous duty
-    if not d_prev_duty_shift_new:
-        prev_duty_shift = d_prev_duty_shift_new
-    elif d_prev_duty_shift:
-        prev_duty_shift={
-            0:{
-                (all_wards[0],duty_types[0]): d_prev_duty_shift[0][all_wards[0]], #w4m_a
-                (all_wards[1],duty_types[0]): d_prev_duty_shift[0][all_wards[1]], #w4f_a
-                (all_wards[2],duty_types[0]): d_prev_duty_shift[0][all_wards[2]], #w9_a
-                (all_wards[4],duty_types[0]): d_prev_duty_shift[0][all_wards[4]][0], #imw_a
-                (all_wards[4],duty_types[1]): d_prev_duty_shift[0][all_wards[4]][1], #imw_s
-            },
-            1:{
-                (all_wards[0],duty_types[0]): d_prev_duty_shift[1][all_wards[0]], #w4m_a
-                (all_wards[1],duty_types[0]): d_prev_duty_shift[1][all_wards[1]], #w4f_a
-                (all_wards[2],duty_types[0]): d_prev_duty_shift[1][all_wards[2]], #w9_a
-                (all_wards[4],duty_types[0]): d_prev_duty_shift[1][all_wards[4]][0], #imw_a
-                (all_wards[4],duty_types[1]): d_prev_duty_shift[1][all_wards[4]][1], #imw_s
-            },
-            2:{
-                (all_wards[0],duty_types[0]): d_prev_duty_shift[2][all_wards[0]], #w4m_a
-                (all_wards[1],duty_types[0]): d_prev_duty_shift[2][all_wards[1]], #w4f_a
-                (all_wards[2],duty_types[0]): d_prev_duty_shift[2][all_wards[2]], #w9_a
-                (all_wards[4],duty_types[0]): d_prev_duty_shift[2][all_wards[4]][0], #imw_a
-                (all_wards[4],duty_types[1]): d_prev_duty_shift[2][all_wards[4]][1], #imw_s
-            }
-        }
-    else:
-        prev_duty_shift={}
+    prev_duty_shift=d_prev_duty_shift
+    # prev_duty_shift={
+    #     0:{
+    #         (all_wards[0],duty_types[0]): d_prev_duty_shift[0][all_wards[0]], #w4m_a
+    #         (all_wards[1],duty_types[0]): d_prev_duty_shift[0][all_wards[1]], #w4f_a
+    #         (all_wards[2],duty_types[0]): d_prev_duty_shift[0][all_wards[2]], #w9_a
+    #         (all_wards[4],duty_types[0]): d_prev_duty_shift[0][all_wards[4]][0], #imw_a
+    #         (all_wards[4],duty_types[1]): d_prev_duty_shift[0][all_wards[4]][1], #imw_s
+    #     },
+    #     1:{
+    #         (all_wards[0],duty_types[0]): d_prev_duty_shift[1][all_wards[0]], #w4m_a
+    #         (all_wards[1],duty_types[0]): d_prev_duty_shift[1][all_wards[1]], #w4f_a
+    #         (all_wards[2],duty_types[0]): d_prev_duty_shift[1][all_wards[2]], #w9_a
+    #         (all_wards[4],duty_types[0]): d_prev_duty_shift[1][all_wards[4]][0], #imw_a
+    #         (all_wards[4],duty_types[1]): d_prev_duty_shift[1][all_wards[4]][1], #imw_s
+    #     },
+    #     2:{
+    #         (all_wards[0],duty_types[0]): d_prev_duty_shift[2][all_wards[0]], #w4m_a
+    #         (all_wards[1],duty_types[0]): d_prev_duty_shift[2][all_wards[1]], #w4f_a
+    #         (all_wards[2],duty_types[0]): d_prev_duty_shift[2][all_wards[2]], #w9_a
+    #         (all_wards[4],duty_types[0]): d_prev_duty_shift[2][all_wards[4]][0], #imw_a
+    #         (all_wards[4],duty_types[1]): d_prev_duty_shift[2][all_wards[4]][1], #imw_s
+    #     }
+    # }
     #coping values of arguments
     num_gps = d_num_gps
     num_days = d_num_days + len(prev_duty_shift)
@@ -85,8 +79,7 @@ def main(
     
     all_gps = range(num_gps)
     all_days = range(num_days)
-    # not_eff_gps = []
-    not_eff_gps = [2]
+    not_eff_gps = []
 
     duty_shifts={}
 
@@ -103,9 +96,13 @@ def main(
         return False
     
     def is_psych_not(d,first_d, is_first_day_true):
-        if d<first_d: return False
+        # if d<first_d: return False
+        #some mistake to be erased after one duty correction
         fde = True if first_d//2==0 else False
-        even_day_true_logic = (fde and is_first_day_true or (not fde and not  is_first_day_true))
+        if d<14:
+            even_day_true_logic = (fde and is_first_day_true or (not fde and not  is_first_day_true))
+        else:
+            even_day_true_logic = not (fde and is_first_day_true or (not fde and not  is_first_day_true))
         if(d%2==0):
             #even logic
             if(even_day_true_logic):
@@ -134,10 +131,9 @@ def main(
                     if is_skippable(d,w,t):
                         continue
                     duty_shifts[(gp,d,w,t)] = model.new_bool_var(f"shift_gp{gp}_d{d}_w{w}_t{t}")
-                    if duty_shifts[(gp,d,w,t)].Index() in range(504,519) or duty_shifts[(gp,d,w,t)].Index() in [3586]:
+                    if duty_shifts[(gp,d,w,t)].Index() in [1176,1177,1178,1179,1180,1181,1182,1183,1183,4072,4073]:
                         print(gp, d,w,duty_shifts[(gp,d,w,t)].Index())
     #create boolean variable for ART ward
-    all_possible_wards.append('ART')
     for d in all_days:
         dow = get_day_of_week(d)
         if dow == 5 or dow == 6 or d in holiday_date_index:
@@ -145,18 +141,15 @@ def main(
             for gp in all_gps:
                 for t in duty_types:
                     duty_shifts[(gp,d,w,t)] = model.new_bool_var(f"shift_gp{gp}_d{d}_w{w}_t{t}")
-                    if duty_shifts[(gp,d,w,t)].Index() in [3586]:
-                        print(gp, d,w,duty_shifts[(gp,d,w,t)].Index())
+                    if duty_shifts[(gp,d,w,t)].Index() in [3904,3905,4072,4073]:
+                        print(gp, d,'a ',duty_shifts[(gp,d,w,t)].Index())
     #create boolean variable for psych ward
-    all_possible_wards.append('PSYCH')
-    for d in range(len(prev_duty_shift),num_days):
+    for d in all_days:
         if is_psych_not(d,len(prev_duty_shift),is_first_day_psych):
             w='PSYCH'
             t=duty_types[1]
             for gp in all_gps:
                 duty_shifts[(gp,d,w,t)] = model.new_bool_var(f"shift_gp{gp}_d{d}_w{w}_t{t}")
-                if duty_shifts[(gp,d,w,t)].Index() in [3586]:
-                        print(gp, d,w,duty_shifts[(gp,d,w,t)].Index())
                 # print(gp, d,'p ',duty_shifts[(gp,d,w,t)].Index())
     
     #add rules (constraints)
@@ -181,9 +174,8 @@ def main(
                 psych_ward = []
             model.add_at_most_one(basic_wards + art_ward + psych_ward)
     #rule 3: each gp should cover IMW before repeating the cycle
-    #becomes hard rule if holidays or entry or skip is multiple; caution
-    # duty_cycle_day = num_gps // len(duty_types)
-    # duty_for_num_days = num_days//duty_cycle_day
+    duty_cycle_day = num_gps // len(duty_types)
+    duty_for_num_days = num_days//duty_cycle_day
     # for gp in all_gps:
     #     if duty_for_num_days!=0:
     #         w = all_wards[4]
@@ -192,16 +184,9 @@ def main(
     #                 i=cc*duty_cycle_day+d if cc*duty_cycle_day+d<num_days else num_days
     #                 j=(cc+1)*duty_cycle_day+d if (cc+1)*duty_cycle_day+d<num_days else num_days
     #                 model.add_at_most_one(duty_shifts[(gp,dd,w,t)] for t in duty_types for dd in range(i,j))
-    # #rule 4: each gp should one have one countable (actual entered) based on free day after duty variable
+    # #rule 4: each gp should one have one countable (actual entered) in 03 days
     countable_wards = all_wards.copy()
     countable_wards.remove('MDR')
-    def force_free_after_duty(d,freedays_after_duty,gp):
-        i = d
-        j = d+freedays_after_duty+1 if d+freedays_after_duty+1<num_days else num_days
-        gen_all_assigned = [duty_shifts[(gp,dd,ww,duty_types[0])] for dd in range(i,j) for ww in countable_wards]
-        gen_imw_signed = [duty_shifts[(gp,dd,all_wards[4],duty_types[1])] for dd in range(i,j)]
-        model.add_at_most_one(gen_all_assigned + gen_imw_signed)
-    day_sick_leaved = list(map(lambda d:d+len(prev_duty_shift)-1,[i for i in range(1,14)])) #on leave days
     for gp in all_gps:
         for w in countable_wards:
             for t in duty_types:
@@ -210,32 +195,30 @@ def main(
                 for d in all_days:
                     if is_skippable(d,w,t):
                         continue
-                    #with leave
-                    if d in day_sick_leaved:
-                        force_free_after_duty(d,1,gp)
-                        continue
-                    #without leave
-                    force_free_after_duty(d,freedays_after_duty,gp)
-                    # i = d
-                    # j = d+freedays_after_duty+1 if d+freedays_after_duty+1<num_days else num_days
-                    # gen_all_assigned = [duty_shifts[(gp,dd,ww,duty_types[0])] for dd in range(i,j) for ww in countable_wards]
-                    # gen_imw_signed = [duty_shifts[(gp,dd,all_wards[4],duty_types[1])] for dd in range(i,j)]
-                    # model.add_at_most_one(
-                    #     gen_all_assigned
-                    #     +gen_imw_signed
-                    #     )
+                    i = d
+                    j = d+freedays_after_duty+1 if d+freedays_after_duty+1<num_days else num_days
+                    gen_all_assigned = [duty_shifts[(gp,dd,ww,duty_types[0])] for dd in range(i,j) for ww in countable_wards]
+                    gen_imw_signed = [duty_shifts[(gp,dd,all_wards[4],duty_types[1])] for dd in range(i,j)]
+                    model.add_at_most_one(
+                        gen_all_assigned
+                        +gen_imw_signed
+                        )
         #             # model.add_at_most_one(duty_shifts[(gp,dd,ww,duty_types[0])] for dd in range(i,j) for ww in countable_wards)
     #rule 5: use previous shift to prevent overlaps
     for dd, dict1 in prev_duty_shift.items():
         for (ww,tt), old_gp in dict1.items():
-            model.add(duty_shifts[(old_gp, dd, ww, tt)] == 1)
-
+            model.add(duty_shifts[(int(old_gp), int(dd), ww, tt)] == 1)
+    
+    #rule 5.1: use all set values to figure out the admissables
+    for dd, dict1 in old_duty_set_shift.items():
+        for (ww,tt), old_gp in dict1.items():
+            model.add(duty_shifts[(int(old_gp), int(dd), ww, tt)] == 1)
     #rule 6: Adding ART (other dependent ward)
     for d in all_days:
         w = 'ART'
         ART_possible_ward = all_wards.copy()
         ART_possible_ward.remove('MDR')
-        ART_possible_ward.remove('IMW')
+        # ART_possible_ward.remove('IMW')
         dow = get_day_of_week(d)
         if dow == 5 or dow == 6 or d in holiday_date_index:
             for t in duty_types:
@@ -247,7 +230,7 @@ def main(
                 continue
             for gp in all_gps:
                 one_day_back = d-1 if d-1>=0 else 0
-                prev_day_duty_gp_values = [duty_shifts[(gp,one_day_back,ww,duty_types[0])] for ww in ART_possible_ward]
+                prev_day_duty_gp_values = [duty_shifts[(gp,one_day_back,ww,tt)] if ww == all_wards[4] else duty_shifts[(gp,one_day_back,ww,duty_types[0])] for ww in ART_possible_ward for tt in duty_types]
                 # curr_day_duty_gp_values = [duty_shifts[(gp,d,w,tt)] for tt in duty_types] #want to use for both actual and signed ART from prev duty
                 curr_day_duty_gp_values = [duty_shifts[(gp,d,w,duty_types[0])]] #want to use just actual not signed for one day back rule
                 pddgv = model.new_bool_var(f"prev_gp{gp}_d{d}_w{w}_t{t}")
@@ -265,14 +248,11 @@ def main(
             sun_d_in_w = get_d_for_index_at_week(6,w)
             # if sat_d_in_w >= num_days or sun_d_in_w >= num_days or sat_d_in_w<0 or sun_d_in_w<0:
             #     break
-            # print(sat_d_in_w,sun_d_in_w)
+            print(sat_d_in_w,sun_d_in_w)
             #if both weekends exist in num_days and not out of bound
-            if sat_d_in_w < num_days and sat_d_in_w>=len(prev_duty_shift) and sun_d_in_w < num_days  and sun_d_in_w>=len(prev_duty_shift) :
-                if sun_d_in_w in range(13) and gp in not_eff_gps:
-                    return
+            if sat_d_in_w < num_days and sat_d_in_w>=len(prev_duty_shift) and sun_d_in_w < num_days  and sun_d_in_w>=len(prev_duty_shift):
                 basic_wards_values = [duty_shifts[(gp,d,w,t)] for d in [sat_d_in_w,sun_d_in_w] for w in all_wards for t in duty_types if not is_skippable(d,w,t)]
                 psych_wards_values = [duty_shifts[(gp,d,'PSYCH',duty_types[1])] for d in [sat_d_in_w,sun_d_in_w] if is_psych_not(d,len(prev_duty_shift),is_first_day_psych)]
-                
                 model.add_at_least_one(basic_wards_values+psych_wards_values)    
     #total gp hour
     cal_gp_hrs={}
@@ -280,52 +260,44 @@ def main(
     min_hr = model.new_int_var(0,24*num_days,f"min_gp_hrs")
     avg_hr = model.new_int_var(0,24*num_days,f"avg_gp_hrs")
     total_hr = model.new_int_var(0,24*num_days*num_gps,f"total_gp_hrs")
-    model.add(max_hr>=min_hr)
     #effective gp hour
     eff_gp_hrs={}
     max_eff_hr = model.new_int_var(0,24*num_days,f"max_gp_eff_hrs")
     min_eff_hr = model.new_int_var(0,24*num_days,f"min_gp_eff_hrs")
-    model.add(max_eff_hr>=min_eff_hr)
     #effective signed gp hour
     eff_signed_gp_hrs={}
     max_eff_signed_hr = model.new_int_var(0,24*num_days,f"max_gp_eff_signed_hrs")
     min_eff_signed_hr = model.new_int_var(0,24*num_days,f"min_gp_eff_signed_hrs")
-    model.add(max_eff_signed_hr>=min_eff_signed_hr)
     #total imw entry (assigned)
     cal_gp_imw_num = {}
     max_imw_num = model.new_int_var(0,num_days,f"max_gp_imw_num")
     min_imw_num = model.new_int_var(0,num_days,f"min_gp_imw_num")
-    model.add(max_imw_num>=min_imw_num)
     #total signed hours
     cal_gp_signed_hrs = {}
     max_signed_hrs = model.new_int_var(0,24*num_days,f"max_gp_signed_hrs")
     min_signed_hrs = model.new_int_var(0,24*num_days,f"min_gp_signed_hrs")
-    model.add(max_signed_hrs>=min_signed_hrs)
     #total weekend hours
-    cal_gp_weekend_hol_hrs = {}
-    max_weekend_hol_hrs = model.new_int_var(0,24*num_days,f"max_gp_weekend_hol_hrs")
-    min_weekend_hol_hrs = model.new_int_var(0,24*num_days,f"min_gp_weekend_hol_hrs")
-    model.add(max_weekend_hol_hrs>=min_weekend_hol_hrs)
+    cal_gp_weekend_hrs = {}
+    max_weekend_hrs = model.new_int_var(0,24*num_days,f"max_gp_weekend_hrs")
+    min_weekend_hrs = model.new_int_var(0,24*num_days,f"min_gp_weekend_hrs")
     #total weekend nums
-    cal_gp_weekend_hol_num = {}
-    max_weekend_hol_num = model.new_int_var(0,(num_days//7)-1+len(holiday_date_index),f"max_gp_weekend_hol_num")
-    min_weekend_hol_num = model.new_int_var(0,(num_days//7)-1+len(holiday_date_index),f"min_gp_weekend_hol_num")
-    model.add(max_weekend_hol_num>=min_weekend_hol_num)
+    cal_gp_weekend_num = {}
+    max_weekend_num = model.new_int_var(0,(num_days//7)-1,f"max_gp_weekend_num")
+    min_weekend_num = model.new_int_var(0,(num_days//7)-1,f"min_gp_weekend_num")
     #total imw weekend entry (assigned)
     cal_gp_imw_weekend_num = {}
     max_imw_weekend_num = model.new_int_var(0,(num_days//7)+1,f"max_gp_imw_weekend_num")
     min_imw_weekend_num = model.new_int_var(0,(num_days//7)+1,f"min_gp_imw_weekend_num")
-    model.add(max_imw_weekend_num>=min_imw_weekend_num)
     for gp in all_gps:
         #calculate hours for each gp
         cal_gp_hrs[gp] = model.new_int_var(0,24*num_days,f"gp_hrs({gp})")
         basic_wards_hrs_values = [duty_shifts[(gp,d,w,t)]*holiday_hrs if d in holiday_date_index else duty_shifts[(gp,d,w,t)]*hrs_per_week[days_of_week[get_day_of_week(d)]] for d in range(len(prev_duty_shift),num_days) for w in all_wards for t in duty_types if not is_skippable(d,w,t)]
         psych_wards_hrs_values = [duty_shifts[(gp,d,'PSYCH',duty_types[1])]*holiday_hrs if d in holiday_date_index else duty_shifts[(gp,d,'PSYCH',duty_types[1])]*hrs_per_week[days_of_week[get_day_of_week(d)]] for d in range(len(prev_duty_shift),num_days) if is_psych_not(d,len(prev_duty_shift),is_first_day_psych)]
-        ART_hrs_values = [duty_shifts[(gp,d,'ART',t)]*ART_hrs for t in duty_types for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6 or d in holiday_date_index]
+        ART_hrs_values = [duty_shifts[(gp,d,'ART',t)]*ART_hrs for t in duty_types for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6]
         model.add(cal_gp_hrs[gp]==sum(basic_wards_hrs_values + ART_hrs_values + psych_wards_hrs_values))
         model.add(cal_gp_hrs[gp]<=max_hr)
         model.add(cal_gp_hrs[gp]>=min_hr)
-        if (not (gp in not_eff_gps)) or not_eff_gps.__len__==0:
+        if not (gp in not_eff_gps):
             eff_gp_hrs[gp] = model.new_int_var(0,24*num_days,f"gp_eff_hrs({gp})")
             model.add(eff_gp_hrs[gp]==cal_gp_hrs[gp])
             model.add(eff_gp_hrs[gp]<=max_eff_hr)
@@ -339,7 +311,7 @@ def main(
         #     for t in duty_types 
         #     for d in range(len(prev_duty_shift),num_days) 
         #     if get_day_of_week(d) == 5 or get_day_of_week(d) ==6] #if sat actual is considered as entry
-        ART_signed_hrs_values = [duty_shifts[(gp,d,'ART',t)]*ART_hrs for t in duty_types for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6 or d in holiday_date_index]
+        ART_signed_hrs_values = [duty_shifts[(gp,d,'ART',t)]*ART_hrs for t in duty_types for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6]
         # psych_wards_hrs_values = [duty_shifts[(gp,d,'PSYCH',duty_types[1])]*hrs_per_week[days_of_week[get_day_of_week(d)]] for d in range(len(prev_duty_shift),num_days) if is_psych_not(d,len(prev_duty_shift),is_first_day_psych)]
         model.add(cal_gp_signed_hrs[gp]==sum(
             basic_wards_signed_hrs_values 
@@ -349,32 +321,32 @@ def main(
             ))
         model.add(cal_gp_signed_hrs[gp]<=max_signed_hrs)
         model.add(cal_gp_signed_hrs[gp]>=min_signed_hrs)
-        if (not (gp in not_eff_gps)) or not_eff_gps.__len__==0:
+        if not (gp in not_eff_gps):
             eff_signed_gp_hrs[gp] = model.new_int_var(0,24*num_days,f"gp_eff_signed_hrs({gp})")
             model.add(eff_signed_gp_hrs[gp]==cal_gp_signed_hrs[gp])
             model.add(eff_signed_gp_hrs[gp]<=max_eff_signed_hr)
             model.add(eff_signed_gp_hrs[gp]>=min_eff_signed_hr)
         #calculate how many imw entry
+        # once_in_every_weekend_if_feasible(gp)
         cal_gp_imw_num[gp] = model.new_int_var(0,num_days,f"gp_imw_num({gp})")
         imw_num_by_each_gp = [duty_shifts[(gp,d,all_wards[4],t)] for d in range(len(prev_duty_shift),num_days) for t in duty_types]
         model.add(cal_gp_imw_num[gp]==sum(imw_num_by_each_gp))
         model.add(cal_gp_imw_num[gp]<=max_imw_num)
         model.add(cal_gp_imw_num[gp]>=min_imw_num)
         #calculate how many weekend entry
-        once_in_every_weekend_if_feasible(gp)
-        cal_gp_weekend_hol_num[gp] = model.new_int_var(0,num_days,f"gp_weekend_num({gp})")
-        weekend_all_assigned = [duty_shifts[(gp,d,ww,duty_types[0])] for ww in countable_wards for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6 or d in holiday_date_index]
-        weekend_imw_signed = [duty_shifts[(gp,d,all_wards[4],duty_types[1])]  for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6 or d in holiday_date_index]
-        model.add(cal_gp_weekend_hol_num[gp]==sum(weekend_all_assigned + weekend_imw_signed))
-        model.add(cal_gp_weekend_hol_num[gp]<=max_weekend_hol_num)
-        model.add(cal_gp_weekend_hol_num[gp]>=min_weekend_hol_num)
+        cal_gp_weekend_num[gp] = model.new_int_var(0,num_days,f"gp_weekend_num({gp})")
+        weekend_all_assigned = [duty_shifts[(gp,d,ww,duty_types[0])] for ww in countable_wards for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6]
+        weekend_imw_signed = [duty_shifts[(gp,d,all_wards[4],duty_types[1])]  for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6]
+        model.add(cal_gp_weekend_num[gp]==sum(weekend_all_assigned + weekend_imw_signed))
+        model.add(cal_gp_weekend_num[gp]<=max_weekend_num)
+        model.add(cal_gp_weekend_num[gp]>=min_weekend_num)
         #calculate how much weekend hrs
-        cal_gp_weekend_hol_hrs[gp] = model.new_int_var(0,24*num_days,f"gp_weekend_hrs({gp})")
-        weekend_basic_hrs_values = [duty_shifts[(gp,d,ww,t)]*hrs_per_week[days_of_week[get_day_of_week(d)]] for t in duty_types for ww in countable_wards for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6 or d in holiday_date_index]
-        weekend_psych_hrs_values = [duty_shifts[(gp,d,'PSYCH',duty_types[1])]*hrs_per_week[days_of_week[get_day_of_week(d)]] for d in range(len(prev_duty_shift),num_days) if is_psych_not(d,len(prev_duty_shift),is_first_day_psych) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6 or d in holiday_date_index]
-        model.add(cal_gp_weekend_hol_hrs[gp]==sum(weekend_basic_hrs_values + weekend_psych_hrs_values))
-        model.add(cal_gp_weekend_hol_hrs[gp]<=max_weekend_hol_hrs)
-        model.add(cal_gp_weekend_hol_hrs[gp]>=min_weekend_hol_hrs)
+        cal_gp_weekend_hrs[gp] = model.new_int_var(0,24*num_days,f"gp_weekend_hrs({gp})")
+        weekend_basic_hrs_values = [duty_shifts[(gp,d,ww,t)]*hrs_per_week[days_of_week[get_day_of_week(d)]] for t in duty_types for ww in countable_wards for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6]
+        weekend_psych_hrs_values = [duty_shifts[(gp,d,'PSYCH',duty_types[1])]*hrs_per_week[days_of_week[get_day_of_week(d)]] for d in range(len(prev_duty_shift),num_days) if is_psych_not(d,len(prev_duty_shift),is_first_day_psych) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6]
+        model.add(cal_gp_weekend_hrs[gp]==sum(weekend_basic_hrs_values + weekend_psych_hrs_values))
+        model.add(cal_gp_weekend_hrs[gp]<=max_weekend_hrs)
+        model.add(cal_gp_weekend_hrs[gp]>=min_weekend_hrs)
         #calculate how many weekend imw entry
         cal_gp_imw_weekend_num[gp] = model.new_int_var(0,num_days,f"gp_imw_weekend_num({gp})")
         weekend_imw_num = [duty_shifts[(gp,d,all_wards[4],t)] for t in duty_types  for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d) == 5 or get_day_of_week(d) ==6]
@@ -388,44 +360,22 @@ def main(
     model.add_division_equality(avg_hr,total_hr,num_gps)
 
     #personalized preferrences
-    #can't be on schedule
-    def skip_duty_all(sgp:int,sds:list[int],use_sds_direct=False):
-        if not use_sds_direct:
-            sds = list(map(lambda d:d+len(prev_duty_shift)-1,sds))
-        skip_basic_wards_values = [duty_shifts[(sgp,d,w,t)] for d in sds for w in all_wards for t in duty_types if not is_skippable(d,w,t)]
-        skip_psych_wards_values = [
-            duty_shifts[(sgp,d,'PSYCH',duty_types[1])] 
-            for d in sds if is_psych_not(d,len(prev_duty_shift),is_first_day_psych)]
-        skip_ART_values = [
-            duty_shifts[(sgp,d,'ART',t)] 
-            for t in duty_types for d in sds 
-            if get_day_of_week(d) == 5 or get_day_of_week(d) ==6 
-            or d in holiday_date_index
-            ]
-        model.add(sum(skip_basic_wards_values+skip_psych_wards_values+skip_ART_values)==0)
     #can't_be_on_duty function
     def skip_duty(sgp:int,sds:list[int],sws=countable_wards,use_sds_direct=False):
         if not use_sds_direct:
-            sds = list(map(lambda d:d+len(prev_duty_shift)-1,sds))
-        sgp_values = [
-            duty_shifts[(sgp,d,w,t)] if w==all_wards[4] else duty_shifts[(sgp,d,w,duty_types[0])] 
-            for d in sds for w in sws for t in duty_types 
-            if not is_skippable(d,w,t)
-            # if (w!='PSYCH' and not is_skippable(d,w,t)) or (w=='PSYCH' and is_psych_not(d,len(prev_duty_shift),is_first_day_psych))
-        ]
+            sds = map(lambda d:d+len(prev_duty_shift)-1,sds)
+        sgp_values = [duty_shifts[(sgp,d,w,t)] if w==all_wards[4] else duty_shifts[(sgp,d,w,duty_types[0])] for d in sds for w in sws for t in duty_types if not is_skippable(d,w,t)]
         model.add(sum(sgp_values)==0)
     #must be on duty function
     def entry_duty(sgp:int,sds:list[int],sws=countable_wards):
-        sds = list(map(lambda d:d+len(prev_duty_shift)-1,sds))
+        sds = map(lambda d:d+len(prev_duty_shift)-1,sds)
         for d in sds:
-            # sgp_values = [duty_shifts[(sgp,d,w,t)] if w==all_wards[4] else duty_shifts[(sgp,d,w,duty_types[0])] for w in sws for t in duty_types if not is_skippable(d,w,t) and (w==all_wards[4] or (w!=all_wards[4]and t==duty_types[0]))] #works but hard to read
-            sgp_values_basic = [duty_shifts[(sgp,d,w,duty_types[0])] for w in sws if not is_skippable(d,w,t)]
-            sgp_values_imw = [duty_shifts[(sgp,d,all_wards[4],t)] for t in duty_types]
-            model.add(sum(sgp_values_basic + sgp_values_imw)==1)
-            # model.add_exactly_one(sgp_values)
+            sgp_values = [duty_shifts[(sgp,d,w,t)] if w==all_wards[4] else duty_shifts[(sgp,d,w,duty_types[0])] for w in sws for t in duty_types if not is_skippable(d,w,t)]
+            # model.add(sum(sgp_values)==1)
+            model.add_at_least_one(sgp_values)
     #GP_9 will not be working on sundays
-    # agp9_sun_ds = [d for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d)==6]
-    # skip_duty(9,agp9_sun_ds,use_sds_direct=True)
+    agp9_sun_ds = [d for d in range(len(prev_duty_shift),num_days) if get_day_of_week(d)==6]
+    skip_duty(9,agp9_sun_ds,use_sds_direct=True)
     # for d in all_days:
     #     dow = get_day_of_week(d)
     #     if dow == 6:
@@ -433,19 +383,23 @@ def main(
     #         agp_values = [duty_shifts[(agp,d,w,t)] if w==all_wards[4] else duty_shifts[(agp,d,w,duty_types[0])] for w in countable_wards for t in duty_types]
     #         model.add(sum(agp_values)==0) 
     #GP-0: can't be on duty on tuesday; on saturday = be in intermediate
-    # for d in range(len(prev_duty_shift),num_days):
-    #     agp = 0
-    #     dow= get_day_of_week(d)
-    #     #tuesday rule
-    #     if dow==1:
-    #         skip_duty(agp,[d],use_sds_direct=True)
-    #         # agp_values = [duty_shifts[(agp,d,w,t)] if w==all_wards[4] else duty_shifts[(agp,d,w,duty_types[0])] for w in countable_wards for t in duty_types if not is_skippable(d,w,t)]   
-    #         # model.add(sum(agp_values)==0)
-    #     #saturday intermediate rule
-    #     if dow == 5:
-    #         skip_duty(agp,[d],[w for w in countable_wards if w !=all_wards[4]],use_sds_direct=True)
-    #         # agp_values = [duty_shifts[(agp,d,w,duty_types[0])] for w in countable_wards if w!=all_wards[4]]
-    #         # model.add(sum(agp_values)==0
+    for d in range(len(prev_duty_shift),num_days):
+        agp = 0
+        dow= get_day_of_week(d)
+        #tuesday rule
+        if dow==1:
+            skip_duty(0,[d],use_sds_direct=True)
+            # agp_values = [duty_shifts[(agp,d,w,t)] if w==all_wards[4] else duty_shifts[(agp,d,w,duty_types[0])] for w in countable_wards for t in duty_types if not is_skippable(d,w,t)]   
+            # model.add(sum(agp_values)==0)
+        #saturday intermediate rule
+        if dow == 5:
+            skip_duty(0,[d],[w for w in countable_wards if w !=all_wards[4]],use_sds_direct=True)
+            # agp_values = [duty_shifts[(agp,d,w,duty_types[0])] for w in countable_wards if w!=all_wards[4]]
+            # model.add(sum(agp_values)==0)
+    # #make gp 2 take a leave for 9 days
+    # leave_assigned_values_gp_2 = [duty_shifts[(2,d,w,t)] if w == all_wards[4] else duty_shifts[(2,d,w,duty_types[0])] for d in range(len(prev_duty_shift),len(prev_duty_shift)+8) for w in countable_wards for t in duty_types if not is_skippable(d,w,t)]
+    # model.add(sum(leave_assigned_values_gp_2)==0)
+    #skip_duty(2,[i in range(1,10)])
     #make gp 2 in same duty with gp 1 as much as possible
     count_gp_2_assigned = model.new_int_var(0,num_days,f"gp_2_assigned_count")
     assigned_values_gp_2 = [duty_shifts[(2,d,w,t)] if w == all_wards[4] else duty_shifts[(2,d,w,duty_types[0])] for d in range(len(prev_duty_shift),num_days) for w in countable_wards for t in duty_types if not is_skippable(d,w,t)]
@@ -484,7 +438,7 @@ def main(
         model.add(count_gp_x_y_together==sum(list_gp_x_y_together))
         return count_gp_x_y_together
     to_be_apart = [ #day time same shift
-        # (10,12), #w4
+        (10,12), #w4
         (1,4),#MDR
         (2,5),#ART
         (9,14),#IMW
@@ -562,29 +516,19 @@ def main(
     #     model.add(count_gp_8_intern_together==sum(list_gp_8_intern_together))
     # model.add(cal_gp_hrs[8]==min_hr)
     # model.add(cal_gp_signed_hrs[8]==min_signed_hrs)
-    # #make gp 2 take a leave for 11 days
-    skip_duty_all(2,[i for i in range(1,12)])
-    skip_duty(2,[29])
-    # skip_duty(2,[i for i in range(1,12)])
-    model.add(cal_gp_hrs[2]==min_hr)
-    model.add(max_hr-cal_gp_hrs[2]<=64) #hard rule
-    #GP_1 personal skip
-    skip_duty(1,[4])
     #GP_6 personal skip
-    skip_duty(6,[28,29])
+    # skip_duty(6,[28,29])
     #GP_11 personal skip
-    skip_duty(11,[28,29])
-    model.add(cal_gp_weekend_hol_num[11]==min_weekend_hol_num)
+    # skip_duty(11,[28,29])
+    # model.add(cal_gp_weekend_num[11]==min_weekend_num)
     #Must enter for 29
-    entry_duty(4,[29])
-    entry_duty(5,[29])
-    entry_duty(7,[29])
-    entry_duty(13,[29])
-    # entry_duty(1,[29])
+    # entry_duty(4,[29])
+    # entry_duty(5,[29])
+    # entry_duty(7,[29])
     #GP_10 and GP_11 together in IMW
-    count_10_11_imw_together = count_them_if_together(1245,10,11,[all_wards[4]],False)
-    model.add(count_10_11_imw_together>=1)
-    #compensating old mishaps
+    # count_10_11_imw_together = count_them_if_together(1245,10,11,[all_wards[4]],False)
+    # model.add(count_10_11_imw_together>=1)
+    # #compensating old mishaps
     ## making disadvantaged gps have high hours
     # model.add(cal_gp_hrs[5]==max_hr)
     # model.add(cal_gp_hrs[8]>=max_hr-2)
@@ -620,30 +564,28 @@ def main(
     # comp_gp_value_list.append(cal_gp_hrs[9]-(avg_hr-18.4))
     ## optimization functions for compensating old mishaps
     # fairness_minimizer = model.new_int_var(0,24*num_days*num_gps*100,f"fairness_minimizer")
-    # model.add(fairness_minimizer==4*(max_hr-min_hr)+2*(max_weekend_hol_num-min_weekend_hol_num)+4*(max_signed_hrs-min_signed_hrs))
+    # model.add(fairness_minimizer==4*(max_hr-min_hr)+2*(max_weekend_num-min_weekend_num)+4*(max_signed_hrs-min_signed_hrs))
     # compensation_minimizer = model.new_int_var(num_days*24*-100,num_days*24*100,f"compensation_minimizer")
     # model.add(compensation_minimizer==2*(cal_gp_hrs[5]-cal_gp_hrs[8])+3*(cal_gp_hrs[5]-cal_gp_hrs[12]))
     ## Final minimize model if compensating old mishaps occured
     # model.minimize(4*fairness_minimizer + compensation_minimizer)
     # model.minimize(fairness_minimizer+(count_gp_2_assigned-count_gp_2_1_together)) #add gp_2 and gp_1 togther benefit
     #hard rules to make it better if possible
-    model.add(max_weekend_hol_num-min_weekend_hol_num<=1)
+    # model.add(max_weekend_num-min_weekend_num<=1)
     # model.add(count_gp_8_assigned-count_gp_8_intern_together==0) #do this only after feasiblity check
-    # model.add(max_weekend_hol_hrs-min_weekend_hol_hrs==0) #do this only after feasiblity check
-    model.add(max_eff_hr-min_eff_hr<=8) #do this only after feasiblity check
-    model.add(max_eff_signed_hr-min_eff_signed_hr<=17) #do this only after feasiblity check
+    # model.add(max_weekend_hrs-min_weekend_hrs==0) #do this only after feasiblity check
+    # model.add(max_eff_hr-min_eff_hr==0) #do this only after feasiblity check
+    # model.add(max_eff_signed_hr-min_eff_signed_hr==0) #do this only after feasiblity check
     model.minimize(
-        2*(max_hr-min_hr) #total hr
-        +4*(max_signed_hrs-min_signed_hrs) #signed hrs
-        +8*(max_eff_hr-min_eff_hr) # effective total hr 
-        +8*(max_eff_signed_hr-min_eff_signed_hr) #effective signed hrs
-        +2*(max_weekend_hol_hrs-min_weekend_hol_hrs) #all hrs in weekend
-        +4*(max_weekend_hol_num-min_weekend_hol_num) #entry in weekend
-        +4*(max_imw_weekend_num-min_imw_weekend_num) #entry in imw at weekend
-        +4*(max_imw_num-min_imw_num) #entry in imw
+        4*(max_hr-min_hr)
+        # +8*(max_weekend_num-min_weekend_num)
+        +8*(max_eff_hr-min_eff_hr) 
+        # +4*(max_weekend_hrs-min_weekend_hrs)
+        +4*(max_signed_hrs-min_signed_hrs)
+        +8*(max_eff_signed_hr-min_eff_signed_hr)
         #+2*(cal_gp_hrs[5]-cal_gp_hrs[8])+3*(cal_gp_hrs[5]-cal_gp_hrs[12])
         +4*(count_gp_2_assigned-count_gp_2_1_together)
-        +8*sum(list_count_together_to_be_appart)
+        +4*sum(list_count_together_to_be_appart)
         # +8*(count_gp_8_assigned-count_gp_8_intern_together)
         )
     basic_wards_values = [duty_shifts[(gp,d,w,t)] for d in range(len(prev_duty_shift),num_days) for w in all_wards for t in duty_types if not is_skippable(d,w,t)]
@@ -654,7 +596,6 @@ def main(
         cp_model.CHOOSE_LOWEST_MIN,
         cp_model.SELECT_MIN_VALUE
     )
-    print('logic len psych',len(psych_wards_values))
     #solver logic
     solver = cp_model.CpSolver()
     #first solve with randomization to check feasibility
@@ -669,7 +610,7 @@ def main(
     # if trial_status == cp_model.OPTIMAL or trial_status == cp_model.FEASIBLE:
     #     hints = {}
     #     for d in range(len(prev_duty_shift),num_days):
-    #         for w in all_wards: 
+    #         for w in all_wards:
     #             for t in duty_types:
     #                 if is_skippable(d,w,t):
     #                     continue
@@ -683,19 +624,19 @@ def main(
     solver.parameters.max_time_in_seconds= 60*d_max_min
     solver.parameters.log_search_progress = True
     #default and randomize
-    solver.parameters.random_seed = 48
+    solver.parameters.random_seed = 24
     solver.parameters.randomize_search = True
     # solver.parameters.search_random_variable_pool_size = 30
     # solver.parameters.use_overload_checker_in_cumulative = False
-    solver.parameters.add_clique_cuts = True
-    solver.parameters.add_objective_cut = True
+    # solver.parameters.add_clique_cuts = True
+    # solver.parameters.add_objective_cut = True
     #make the search aggressive
-    # solver.parameters.search_branching = cp_model.FIXED_SEARCH
+    solver.parameters.search_branching = cp_model.FIXED_SEARCH
     solver.parameters.use_sat_inprocessing = True
     solver.parameters.use_objective_lb_search = True
     solver.parameters.use_feasibility_pump = True
     solver.parameters.use_feasibility_jump = True
-    solver.parameters.use_extended_probing = True
+    # solver.parameters.use_extended_probing = True
     solver.parameters.use_blocking_restart = True
     solver.parameters.use_objective_shaving_search = True
     #solver performance
@@ -705,7 +646,7 @@ def main(
     solver.parameters.optimize_with_core= True #uses unsat to prune out imposible bounds on presolve
     solver.parameters.optimize_with_max_hs = True #works with optimize_with_core increase effeciency
     # solver.parameters.optimize_with_lb_tree_search = True #experimental; don't use it #tree based lower bound chasing to prune it if lower than current best
-    solver.parameters.linearization_level = 3 #high optimazation required for multiple boolvar and intvar
+    solver.parameters.linearization_level = 2 #high optimazation required for multiple boolvar and intvar
     solver.parameters.use_lns = True #LNS (large neighberhood search)
     solver.parameters.use_lns_only = False
     solver.parameters.use_lb_relax_lns = True #fancy lns 
@@ -723,7 +664,7 @@ def main(
         end_event.set()
         print("Solution:")
         msg_queue.put("Solution:\n")
-        for d in range(len(prev_duty_shift),num_days): #change to range(len(prev_duty_shift),num_days) after editing
+        for d in all_days: #change to range(len(prev_duty_shift),num_days) after editing
             duty_solution[d] = {}
             print(d,":")
             msg_queue.put(f'{d}:\n')
@@ -779,39 +720,38 @@ def main(
               "; MinE hr", solver.value(min_eff_hr),
               "; Max_sig hr", solver.value(max_signed_hrs),
               "; Min_sig hr", solver.value(min_signed_hrs),
-            # "; cgp8it", solver.value(count_gp_8_assigned)-solver.value(count_gp_8_intern_together),
-              "; MaxWd hr", solver.value(max_weekend_hol_hrs),
-              "; MinWd hr", solver.value(min_weekend_hol_hrs),
+            #   "; cgp8it", solver.value(count_gp_8_assigned)-solver.value(count_gp_8_intern_together),
+              "; MaxWd hr", solver.value(max_weekend_hrs),
+              "; MinWd hr", solver.value(min_weekend_hrs),
               "; MaxES hr", solver.value(max_eff_signed_hr),
               "; MinES hr", solver.value(min_eff_signed_hr),
               "; tg sum", solver.value(sum(list_count_together_to_be_appart)),
               "; tg 2_1", solver.value(count_gp_2_assigned)-solver.value(count_gp_2_1_together),
-              "; IMW E diff", solver.value(max_imw_num)-solver.value(min_imw_num),
               )
         msg_queue.put(f'''Max hr {solver.value(max_hr)};Min hr {solver.value(min_hr)};Avg hr {solver.value(avg_hr)};Max_signed hr {solver.value(max_signed_hrs)};Min_signed hr {solver.value(min_signed_hrs)}\n'''
               )
         for gp in all_gps:
             print(
                 f"gp_{gp}=>",
-                solver.value(cal_gp_hrs[gp]),'hrs;',
-                solver.value(cal_gp_imw_num[gp]),' imw;',
-                solver.value(cal_gp_imw_weekend_num[gp]),' weekend;', 
-                solver.value(cal_gp_weekend_hol_num[gp]),' total weekend;',
-                solver.value(cal_gp_signed_hrs[gp]),'hr signed;',
-                solver.value(cal_gp_weekend_hol_hrs[gp]),'hr weekend;'
+                solver.value(cal_gp_hrs[gp]),' hrs;',
+                solver.value(cal_gp_imw_num[gp]),' imw-',
+                solver.value(cal_gp_imw_weekend_num[gp]),'weekend', 
+                solver.value(cal_gp_weekend_num[gp]),' total weekend;',
+                solver.value(cal_gp_signed_hrs[gp]),'hr signed',
+                solver.value(cal_gp_weekend_hrs[gp]),'hr weekend'
             )
             msg_queue.put(f'''gp_{gp}=> {solver.value(cal_gp_hrs[gp])} hrs; 
                           \t\t{solver.value(cal_gp_imw_num[gp])} imw; 
                           \t\t{solver.value(cal_gp_imw_weekend_num[gp])} imw weekend;
-                          \t\t{solver.value(cal_gp_weekend_hol_num[gp])} total weekend;
+                          \t\t{solver.value(cal_gp_weekend_num[gp])} total weekend;
                           \t\t{solver.value(cal_gp_signed_hrs[gp])} hr signed\n''')
     else:
         print("No optimal solution found")
         msg_queue.put("No optimal solution found\n")
     return duty_solution
 
-def csv_all_column_writer(duty_solution:dict,all_wards:list,duty_types:list,first_day_index:int,holiday_date_index:list):
-    with open('duty_csv.csv','w',newline='') as f:
+def csv_all_column_writer(duty_solution:dict,all_wards:list,duty_types:list):
+    with open('duty_csv_mod.csv','w',newline='') as f:
             fieldnames = [f"{w}_{t}" for w in all_wards for t in duty_types]
             writer = csv.DictWriter(f,fieldnames=fieldnames)
             for d, dict_each_day in duty_solution.items():
@@ -820,22 +760,9 @@ def csv_all_column_writer(duty_solution:dict,all_wards:list,duty_types:list,firs
                 for (w,t), gp in dict_each_day.items():
                     day_duty[f"{w}_{t}"]=gp
                 writer.writerow(day_duty)
-    with open('duty_csv_for_test.csv','w',newline='') as f:
-        ward_types = [f"{w}" for w in all_wards]
-        fieldnames = ['date']
-        fieldnames.extend(ward_types)
-        writer = csv.DictWriter(f,fieldnames=fieldnames)
-        for d, dict_each_day in duty_solution.items():
-            #for each day
-            t_0 = {w:gp for (w,t),gp in dict_each_day.items() if t == duty_types[0]}
-            t_0['date']=d
-            t_1 = {w:gp for (w,t),gp in dict_each_day.items() if t == duty_types[1]}
-            t_1['date']=d
-            writer.writerows([t_0,t_1])
-    check_values_csv(holiday_date_index=holiday_date_index, first_day_index=first_day_index)
 
-def csv_ward_based_col(duty_solution:dict,all_wards:list,duty_types:list,first_day_index:int,holiday_date_index:list):
-    with open('duty_csv.csv','w',newline='') as f:
+def csv_ward_based_col(duty_solution:dict,all_wards:list,duty_types:list):
+    with open('duty_csv_mod.csv','w',newline='') as f:
             ward_types = [f"{w}" for w in all_wards]
             fieldnames = ['date']
             fieldnames.extend(ward_types)
@@ -846,19 +773,6 @@ def csv_ward_based_col(duty_solution:dict,all_wards:list,duty_types:list,first_d
                 t_0['date']=d
                 t_1 = {w:gp for (w,t),gp in dict_each_day.items() if t == duty_types[1]}
                 writer.writerows([t_0,t_1])
-    with open('duty_csv_for_test.csv','w',newline='') as f:
-            ward_types = [f"{w}" for w in all_wards]
-            fieldnames = ['date']
-            fieldnames.extend(ward_types)
-            writer = csv.DictWriter(f,fieldnames=fieldnames)
-            for d, dict_each_day in duty_solution.items():
-                #for each day
-                t_0 = {w:gp for (w,t),gp in dict_each_day.items() if t == duty_types[0]}
-                t_0['date']=d
-                t_1 = {w:gp for (w,t),gp in dict_each_day.items() if t == duty_types[1]}
-                t_1['date']=d
-                writer.writerows([t_0,t_1])
-    check_values_csv(holiday_date_index=holiday_date_index, first_day_index=first_day_index)
 
 class DayDuty:
     def __init__(self) -> None:
@@ -918,36 +832,72 @@ class DayDuty:
         elif(w==all_wards[5]):self.c_art(av,sv)
         elif(w==all_wards[6]):self.c_psych(av,sv)
 
+
 if __name__ == "__main__":
     all_wards = ['W4M','W4F','W9','MDR','IMW','ART','PSYCH']
-    duty_types = ['actual','signed']
-    d_first_day_index = 2
-    d_holiday_dates = [29]
-    d_prev_duty_shift_new={
-            0: DayDuty().c_w4m(7).c_w4f(5).c_w9(12).c_imw(0,14).day_data(),
-            1: DayDuty().c_w4m(1).c_w4f(6).c_w9(2).c_imw(11,10).day_data()
+    test = {
+        0 : DayDuty().c_w4m(4).c_w4f(5).c_w9(8).c_imw(1,7).c_mdr(1,2).c_art(88,54).day_data()
     }
+    print(test)
+    with open('trial_csv.csv',newline='') as f:
+        reader = csv.reader(f)
+        date_object = {}
+        for row in reader:
+            d_test_object: dict = date_object.setdefault(row[0],{})
+            w4m_test_object: list = d_test_object.setdefault(all_wards[0],[])
+            w4m_test_object.append(row[1])
+            w4f_test_object: list = d_test_object.setdefault(all_wards[1],[])
+            w4f_test_object.append(row[2])
+            w9_test_object: list = d_test_object.setdefault(all_wards[2],[])
+            w9_test_object.append(row[3])
+            mdr_test_object: list = d_test_object.setdefault(all_wards[3],[])
+            mdr_test_object.append(row[4])
+            imw_test_object: list = d_test_object.setdefault(all_wards[4],[])
+            imw_test_object.append(row[5])
+            art_test_object: list = d_test_object.setdefault(all_wards[5],[])
+            art_test_object.append(row[6])
+            psych_test_object: list = d_test_object.setdefault(all_wards[6],[])
+            psych_test_object.append(row[7])
+        cur_duty_data = {}
+        for d, dv in date_object.items():
+            if int(d)<9:continue
+            spec_d: DayDuty = cur_duty_data.setdefault(d,DayDuty())
+            for w, gpvs in dv.items():
+                av = None if gpvs[0].strip()=="Rodas" or (not gpvs[0].strip()) or gpvs[0]=='16' else gpvs[0]
+                sv = None if (not gpvs[1].strip()) or gpvs[1]=='16' else gpvs[1]
+                if av or sv:
+                    spec_d.d_ward(w,av,sv)
+        for d, ddob in cur_duty_data.items():
+            cur_duty_data[d] = ddob.day_data()
+        prev_duty_data = {}
+        for d, dv in date_object.items():
+            if int(d)>=9:continue
+            spec_d: DayDuty = prev_duty_data.setdefault(d,DayDuty())
+            for w, gpvs in dv.items():
+                av = None if gpvs[0].strip()=="Rodas" or (not gpvs[0].strip()) or gpvs[0]=='16' else gpvs[0]
+                sv = None if (not gpvs[1].strip()) or gpvs[1]=='16' else gpvs[1]
+                if av or sv:
+                    spec_d.d_ward(w,av,sv)
+        for d, ddob in prev_duty_data.items():
+            prev_duty_data[d] = ddob.day_data()
+    # all_wards = ['W4M','W4F','W9','MDR','IMW','ART','PSYCH']
+    duty_types = ['actual','signed']
+    print(cur_duty_data)
     duty_solution = main(
-        d_num_gps=15,
-        d_num_days=30,
-        d_freedays_after_duty=2,
-        d_is_first_day_psych=False,
-        d_holiday_dates=d_holiday_dates,
-        d_first_day_index=d_first_day_index,
-        d_prev_duty_shift_new=d_prev_duty_shift_new,
-        d_max_min=1*60,
-        # d_max_min=5,
-        # d_prev_duty_shift=[
-        #     {all_wards[0]:14,all_wards[1]:5,all_wards[2]:7,all_wards[4]:[3,15]},
-        #     {all_wards[0]:4,all_wards[1]:16,all_wards[2]:12,all_wards[4]:[2,6]},
-        #     {all_wards[0]:9,all_wards[1]:13,all_wards[2]:1,all_wards[4]:[10,11]}
-        # ]
+        d_num_gps=16,
+        d_num_days=21,
+        d_first_day_index=2,
+        d_freedays_after_duty=1,
+        d_is_first_day_psych=True,
+        d_holiday_dates=[],
+        d_max_min=5,
+        d_prev_duty_shift=prev_duty_data,
+        old_duty_set_shift=cur_duty_data
     )
-    # csv_ward_based_col(duty_solution,all_wards,duty_types) #temp
+    # # csv_ward_based_col(duty_solution,all_wards,duty_types) #temp
     csv_decision = input("Do you want to create a CSV?[Y,N]").strip().lower()
     if csv_decision == 'y':
         # csv_all_column_writer(duty_solution,all_wards,duty_types)
-        holiday_date_index = list(map(lambda x: x-1 if x-1>=0 else 0,d_holiday_dates))
-        csv_ward_based_col(duty_solution,all_wards,duty_types,d_first_day_index,holiday_date_index)
+        csv_ward_based_col(duty_solution,all_wards,duty_types)
     else:
         sys.exit()
