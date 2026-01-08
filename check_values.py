@@ -58,11 +58,12 @@ class DayDuty:
         elif(w==self.all_wards[5]):self.c_art(av,sv)
         elif(w==self.all_wards[6]):self.c_psych(av,sv)
 
-def check_values_csv(holiday_date_index, first_day_index):
+def check_values_csv(holiday_date_index, first_day_index,len_prev_duty):
     all_wards = ['W4M','W4F','W9','MDR','IMW','ART','PSYCH']
-    def get_day_of_week(d,first_day_index=first_day_index):
-        # change_k = 7 - len(prev_duty_shift) if len(prev_duty_shift)<=7 else 7 - (len(prev_duty_shift)%7)
-        return int(d+first_day_index)%(7) if (d+first_day_index)>=7 else int(d+first_day_index)
+    def get_day_of_week(d,first_day_index=first_day_index,len_prev_duty=len_prev_duty):
+        change_k = 7 - len_prev_duty if len_prev_duty<=7 else 7 - len_prev_duty
+        # d = d-1+len_prev_duty
+        return int(d+first_day_index+change_k)%(7) if (d+first_day_index+change_k)>=7 else int(d+first_day_index+change_k)
     
     cur_duty_data = {}
     with open('duty_csv_for_test.csv',newline='') as f:
@@ -94,6 +95,7 @@ def check_values_csv(holiday_date_index, first_day_index):
         for d, ddob in cur_duty_data.items():
             cur_duty_data[d] = ddob.day_data()
         gp_values={}
+        mul_hr = {"wd":1.5, "we":2,"h":2.5}
         #M-T; F; WE; ART; hrs
         for d, dv in cur_duty_data.items():
             d = int(d)
@@ -105,24 +107,32 @@ def check_values_csv(holiday_date_index, first_day_index):
                 gp_WE = each_gp.setdefault('count_we',0)
                 gp_ART = each_gp.setdefault('count_art',0)
                 gp_hrs = each_gp.setdefault('hrs',0)
+                gp_mon_hrs = each_gp.setdefault('money_hr',0)
                 if w==all_wards[5]:
                     #art rule
                     each_gp['count_art'] = gp_ART + 1
                     each_gp['hrs'] = gp_hrs + 8
+                    each_gp['money_hr'] = gp_mon_hrs + 8*mul_hr['we']
                 elif get_day_of_week(d)==5 or get_day_of_week(d)==6 or d in holiday_date_index:
                     #weekend or holiday rule
                     each_gp['count_we']=gp_WE +1
                     each_gp['hrs']=gp_hrs+24
+                    if d in holiday_date_index:
+                        each_gp['money_hr'] = gp_mon_hrs + 24*mul_hr['h']
+                    else:
+                        each_gp['money_hr'] = gp_mon_hrs + 24*mul_hr['we']
                 elif get_day_of_week(d)==4:
                     #friday rule
                     each_gp['count_fri']=gp_F+1
                     each_gp['hrs']=gp_hrs+17
+                    each_gp['money_hr'] = gp_mon_hrs + 17*mul_hr['wd']
                 else:
                     each_gp['count_mon_thr']=gp_M_T+1
                     each_gp['hrs']=gp_hrs+16
+                    each_gp['money_hr'] = gp_mon_hrs + 16*mul_hr['wd']
         print(gp_values)
     with open('duty_csv_values_check.csv','w',newline='') as f:
-        check_params = ['count_mon_thr','count_fri','count_we','count_art','hrs']
+        check_params = ['count_mon_thr','count_fri','count_we','count_art','hrs','money_hr']
         fieldnames = ['gp']
         fieldnames.extend(check_params)
         writer = csv.DictWriter(f,fieldnames=fieldnames)
@@ -133,7 +143,8 @@ def check_values_csv(holiday_date_index, first_day_index):
     
 
 if __name__ == "__main__":
-    holiday_date_index = list(map(lambda x:x-1 if x-1>=0 else 0,[29]))
-    first_day_index = 2
-    check_values_csv(holiday_date_index=holiday_date_index, first_day_index=first_day_index)
+    first_day_index = 4
+    len_prev_duty = 2
+    holiday_date_index = list(map(lambda x:x-1+len_prev_duty if x-1>=0 else 0,[11]))
+    check_values_csv(holiday_date_index=holiday_date_index, first_day_index=first_day_index,len_prev_duty=len_prev_duty)
     
