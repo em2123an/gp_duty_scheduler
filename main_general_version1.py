@@ -846,7 +846,7 @@ if __name__ == "__main__":
         #eff hour stabilizer
         # dt.get_model().add(dt.min_eff_hr>=306)
         # dt.get_model().add(dt.max_eff_hr-dt.min_eff_hr<=7)
-        # dt.get_model().add(dt.max_entry_eff_hr-dt.min_entry_eff_hr<=32)
+        dt.get_model().add(dt.max_entry_eff_hr-dt.min_entry_eff_hr<=8)
         #weekend stabilizer
         # dt.get_model().add(dt.max_weekend_hol_num<=4)
         # dt.get_model().add(dt.max_weekend_hol_num-dt.min_weekend_hol_num==1)
