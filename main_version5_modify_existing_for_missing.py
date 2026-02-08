@@ -860,7 +860,7 @@ if __name__ == "__main__":
             psych_test_object.append(row[7])
         cur_duty_data = {}
         for d, dv in date_object.items():
-            if int(d)<9:continue
+            # if int(d)<9:continue
             spec_d: DayDuty = cur_duty_data.setdefault(d,DayDuty())
             for w, gpvs in dv.items():
                 av = None if gpvs[0].strip()=="Rodas" or (not gpvs[0].strip()) or gpvs[0]=='16' else gpvs[0]
@@ -869,17 +869,20 @@ if __name__ == "__main__":
                     spec_d.d_ward(w,av,sv)
         for d, ddob in cur_duty_data.items():
             cur_duty_data[d] = ddob.day_data()
-        prev_duty_data = {}
-        for d, dv in date_object.items():
-            if int(d)>=9:continue
-            spec_d: DayDuty = prev_duty_data.setdefault(d,DayDuty())
-            for w, gpvs in dv.items():
-                av = None if gpvs[0].strip()=="Rodas" or (not gpvs[0].strip()) or gpvs[0]=='16' else gpvs[0]
-                sv = None if (not gpvs[1].strip()) or gpvs[1]=='16' else gpvs[1]
-                if av or sv:
-                    spec_d.d_ward(w,av,sv)
-        for d, ddob in prev_duty_data.items():
-            prev_duty_data[d] = ddob.day_data()
+        prev_duty_data = {
+            0: DayDuty().c_w4m(7).c_w4f(5).c_w9(12).c_imw(0,14).day_data(),
+            1: DayDuty().c_w4m(1).c_w4f(6).c_w9(2).c_imw(11,10).day_data()
+    }
+        # for d, dv in date_object.items():
+        #     if int(d)>=9:continue
+        #     spec_d: DayDuty = prev_duty_data.setdefault(d,DayDuty())
+        #     for w, gpvs in dv.items():
+        #         av = None if gpvs[0].strip()=="Rodas" or (not gpvs[0].strip()) or gpvs[0]=='16' else gpvs[0]
+        #         sv = None if (not gpvs[1].strip()) or gpvs[1]=='16' else gpvs[1]
+        #         if av or sv:
+        #             spec_d.d_ward(w,av,sv)
+        # for d, ddob in prev_duty_data.items():
+        #     prev_duty_data[d] = ddob.day_data()
     # all_wards = ['W4M','W4F','W9','MDR','IMW','ART','PSYCH']
     duty_types = ['actual','signed']
     print(cur_duty_data)
