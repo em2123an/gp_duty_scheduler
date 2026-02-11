@@ -239,13 +239,32 @@ class DutyScheduleTable():
         skip_gen = (self.get_available_entry_cell_value(sgp,d,w,t,0) for d in sds for w in self.all_wards for t in range(self.gp_alloc_per_ward))
         self.model.add(sum(skip_gen)==0)
     #must be on duty function
-    def entry_duty(self,egp:int,eds:list[int],use_eds_direct=False):
+    def entry_duty(self,egp:int,eds:list[int],ews:list=[],ets:list=[],use_eds_direct=False):
+        ws=DutyScheduleTable.empty_defaulter(ews,[w for w in self.all_wards])
+        ts=DutyScheduleTable.empty_defaulter(ets,[t for t in range(self.gp_alloc_per_ward)])
         if not use_eds_direct:
             eds = list(map(lambda d:d-1,eds))
         for d in eds:
-            entry_gen = (self.get_available_entry_cell_value(egp,d,w,t,0) for w in self.all_wards for t in range(self.gp_alloc_per_ward) )
+            entry_gen = (self.get_available_entry_cell_value(egp,d,w,t,0) for w in ws for t in ts )
             self.model.add(sum(entry_gen)==1)
+    def set_duty_status(self,gp:int,ds:list,w:str,t:int,value:bool,use_ds_direct=False):
+        #checker
+        if not(w in self.all_wards) or not(t in range(self.gp_alloc_per_ward)): return
+        if not use_ds_direct:
+            ds = list(map(lambda d: d-1,ds))
+        for d in ds:
+            if not (d in range(self.num_days)): return
+            if not self.is_cell_available(gp,d,w,t): return
+            self.model.add(self.get_available_cell_value(gp,d,w,t,0)==int(value))
             # model.add_exactly_one(sgp_values)
+    def set_gps_for_duties(self,gps:list,loc:list,use_ds_direct=True):
+        for i,(d,w,t) in enumerate(loc):
+            igp = gps[i]
+            self.set_duty_status(igp,[d],w,t,True,use_ds_direct)
+            # self.model.add(self.get_available_cell_value(igp,d,w,t,0)==1)
+    def set_cell_values(self,values:list,use_ds_direct=True):
+        for (gp,d,w,t) in values:
+            self.set_duty_status(gp,[d],w,t,True,use_ds_direct)
     #count how many time each gp got into duty together
     def count_them_if_together(self,gpx,gpy,weekend_exc = False,ws=[],ds=[],ts=[]):
         list_gp_x_y_together=[]
@@ -423,16 +442,23 @@ class DutyScheduleTable():
 
 class AlertDutyScheduler(DutyScheduleTable):
     class Hr_mng():
-        def __init__(self,hr:int,mul:float,name='') -> None:
+        def __init__(self,hr:int,mul:float,actual_hr:int,name='') -> None:
             self.hr = hr
             self.mul = mul 
             self.name = name
+            self.actual_hr = actual_hr
         def get_hr(self):
             return self.hr
+        def get_actual_hr(self):
+            return self.actual_hr
         def get_mul(self):
             return self.mul
         def get_mul_hr(self):
             return self.hr * self.mul
+        def set_hr(self,value):
+            self.hr = value
+        def set_mul(self,value):
+            self.mul = value
         def cal_adjuster(self):
             mul_str = str(self.mul)
             i = mul_str[::-1].find('.')
@@ -443,15 +469,16 @@ class AlertDutyScheduler(DutyScheduleTable):
     def __init__(self, num_gps: int, num_days: int, first_day_index: int, holiday_dates: list, all_wards: list, gp_alloc_per_ward: int):
         super().__init__(num_gps, num_days, first_day_index, holiday_dates, all_wards, gp_alloc_per_ward)
         self.hr_managment={
-            'hol_day':AlertDutyScheduler.Hr_mng(24,2.5,'hol_day'),
-            'mon-thr':AlertDutyScheduler.Hr_mng(16,1.5,'mon_thr'),
-            'fri':AlertDutyScheduler.Hr_mng(17,1.5,'fri'),
-            'sat-sun':AlertDutyScheduler.Hr_mng(24,2,'sat_sun'),
-            'ART': AlertDutyScheduler.Hr_mng(8,2,'ART'),
+            'hol_day':AlertDutyScheduler.Hr_mng(24,2.5,24,'hol_day'),
+            'mon-thr':AlertDutyScheduler.Hr_mng(8,1.5,16,'mon_thr'),
+            'fri':AlertDutyScheduler.Hr_mng(8,1.5,17,'fri'),
+            'sat-sun':AlertDutyScheduler.Hr_mng(24,2,24,'sat_sun'),
+            'ART': AlertDutyScheduler.Hr_mng(8,2,8,'ART'),
+            # 'ART2': AlertDutyScheduler.Hr_mng(8,2,'ART2'),
         }
         self.adjuster = max((hrmn.cal_adjuster() for hrmn in self.hr_managment.values()))
         self.max_mul = int(max((hrmn.get_mul_hr() for hrmn in self.hr_managment.values())))
-        self.special_ward = ['ART']
+        self.special_ward = ['ART','ART2']
         self.not_eff_gps = []
         self.extra_eff_gps = []
         self.weighted_values_for_optimization = []
@@ -459,6 +486,7 @@ class AlertDutyScheduler(DutyScheduleTable):
         self.displayable_per_gp_value_dict=[]
         self.add_on_optimizers(self.hr_optimization)
         self.add_on_optimizers(self.weekend_hol_num_opt)
+        self.add_on_optimizers(self.count_each_gp_duty)
         self.add_on_display_results(self.display_opt_res)
         self.add_on_display_results(self.display_opt_per_gp)
         self.add_on_display_results(self.display_opt_values)
@@ -555,10 +583,18 @@ class AlertDutyScheduler(DutyScheduleTable):
             ])
     def weekend_hol_num_opt(self):
         self.max_weekend_hol_num,self.min_weekend_hol_num,self.cal_gp_weekend_hol_num = self.max_min_opt_per_gp_helper('weekend_hol_num',self.num_days,self.opt_num_weekend_holiday_logic)
-        self.max_weekend_hol_hr,self.min_weekend_hol_hr,self.cal_gp_weekend_hol_hr = self.max_min_opt_per_gp_helper('weekend_hol_num',24*self.num_days,self.opt_hr_weekend_holiday_logic)
+        self.max_weekend_hol_hr,self.min_weekend_hol_hr,self.cal_gp_weekend_hol_hr = self.max_min_opt_per_gp_helper('weekend_hol_hr',24*self.num_days,self.opt_hr_weekend_holiday_logic)
         self.add_on_diff_weighted_values(self.max_weekend_hol_num,self.min_weekend_hol_num,4)
         self.add_on_diff_weighted_values(self.max_weekend_hol_hr,self.min_weekend_hol_hr,2)
         
+
+    def count_each_gp_duty(self):
+        self.max_duty_total_count_num,self.min_duty_total_count_num,self.cal_gp_duty_total_count_num = self.max_min_opt_per_gp_helper('count_duty_total',self.num_days,self.opt_num_duty_count_logic)
+        self.max_duty_count_we_h_num,self.min_duty_count_we_h_num,self.cal_gp_duty_count_we_h_num = self.max_min_opt_per_gp_helper('count_duty_we_h',self.num_days,self.opt_we_h_num_duty_count_logic)
+        self.add_on_diff_weighted_values(self.max_duty_total_count_num,self.min_duty_total_count_num,6)
+        self.add_on_diff_weighted_values(self.max_duty_count_we_h_num,self.min_duty_count_we_h_num,6)
+        self.add_displayable_per_gp_value_dict([self.cal_gp_duty_total_count_num,self.cal_gp_duty_count_we_h_num])
+        self.add_displayable_values([self.max_duty_total_count_num,self.min_duty_total_count_num,self.max_duty_count_we_h_num,self.min_duty_count_we_h_num])
     #hour optimization (in this case, minimization) 
     def hr_optimization(self):
         self.hr_opt_gen_hr()
@@ -578,7 +614,12 @@ class AlertDutyScheduler(DutyScheduleTable):
         # self.add_on_weighted_values(max,weight,use_adjuster)
         # self.add_on_weighted_values(min,-1*weight,use_adjuster)
     
-    
+    def opt_num_duty_count_logic(self,gp,cal_gp_duty_count_num):
+        count_duty_per_gp = (self.get_available_cell_value(gp,d,w,t,0) for d in range(self.num_days) for w in self.all_wards for t in range(self.gp_alloc_per_ward))
+        self.get_model().add(cal_gp_duty_count_num==sum(count_duty_per_gp))    
+    def opt_we_h_num_duty_count_logic(self,gp,cal_gp_duty_count_we_h_num):
+        count_duty_per_gp = (self.get_available_cell_value(gp,d,w,t,0) for d in range(self.num_days) for w in self.all_wards for t in range(self.gp_alloc_per_ward) if self.is_cell_weekend(gp,d,w,t) or self.is_cell_holiday(gp,d,w,t))
+        self.get_model().add(cal_gp_duty_count_we_h_num==sum(count_duty_per_gp))    
     def opt_hr_weekend_holiday_logic(self,gp,cal_weekend_hol_hr):
         weekend_hol_per_gp = (self.get_available_entry_cell_value(gp,d,w,t,0)*self.cal_hrs_per_hr_management(self.get_data(gp,d,w,t),d,w).get('hr',0) for d in range(self.num_days) for w in self.all_wards for t in range(self.gp_alloc_per_ward) if self.is_cell_weekend(gp,d,w,t) or self.is_cell_holiday(gp,d,w,t))
         self.get_model().add(cal_weekend_hol_hr==sum(weekend_hol_per_gp))
@@ -605,6 +646,8 @@ class AlertDutyScheduler(DutyScheduleTable):
             self.get_model().add(cal_list[gp]<=max)
             self.get_model().add(cal_list[gp]>=min)
             logic(gp,cal_list[gp])
+        self.get_model().add_max_equality(max,[cal_value for cal_value in cal_list.values()])
+        self.get_model().add_min_equality(min,[cal_value for cal_value in cal_list.values()])
         return (max, min, cal_list)
     def hr_calculator_per_gp(self,gp:int,ds:list=[],ws:list=[],ts:list=[]):
         cal_gp_hrs_data_set={'hr':[],'mul_hr':[],'entry_hr':[]}
@@ -622,10 +665,12 @@ class AlertDutyScheduler(DutyScheduleTable):
             hrs_val['hr']=hm.get_hr()
             hrs_val['mul_hr']=int(hm.get_mul_hr()*self.adjuster)
             if cell_data.get_is_entry():
-                hrs_val['entry_hr']=hm.get_hr()
+                hrs_val['entry_hr']=hm.get_actual_hr()
             return hrs_val
-        if w == 'ART':
+        if w in self.special_ward:
             hm = self.hr_managment.get('ART')
+            if cell_data.get_is_holiday():
+                hm.set_mul(self.hr_managment.get('hol_day').get_mul())
         elif cell_data.get_is_holiday():
             hm = self.hr_managment.get('hol_day')
         else:
@@ -729,19 +774,23 @@ class AlertDutyScheduler(DutyScheduleTable):
         
 if __name__ == "__main__":
     dt = AlertDutyScheduler(
-        15,30,6,[23],["W4M","W4F","W9","MDR","IMW","ART","PSYCH"],1
+        15,30,6,[23],["W4M","W4F","W9","MDR","IMW","ART","PSYCH"],2
     )
     def basic_wards_setup():
         # dt.set_cells_unavailable([d for d in range(dt.num_days) if not (dt.is_weekend(d) or d in dt.holiday_dates_indexes)],["W4M","W4F"],[1])
+        dt.set_cells_unavailable([d for d in range(dt.num_days)],["W4M","W4F","W9"],[1])
         dt.set_cells_unavailable([d for d in range(dt.num_days) if not (dt.is_weekend(d) or d in dt.holiday_dates_indexes)],["ART"])
-        # dt.set_cells_unavailable([d for d in range(dt.num_days) if not (dt.is_weekend(d) or d in dt.holiday_dates_indexes)],["ART2"])
+        dt.set_cells_unavailable([d for d in range(dt.num_days) if dt.is_weekend(d) or d in dt.holiday_dates_indexes],["MDR"],[1])
+        
         # dt.set_cells_unavailable([d for d in range(dt.num_days) if not (dt.is_weekend(d) or d in dt.holiday_dates_indexes)],["W4M","W4F"],[1])
         # dt.set_cells_unavailable([d for d in range(dt.num_days) if dt.is_weekend(d) or d in dt.holiday_dates_indexes],["MDR"])
         dt.set_cells_unavailable([d for d in range(dt.num_days) if (d%2==0)],["PSYCH"],[])
-        # dt.set_cells_unavailable([d for d in range(dt.num_days) if not(d%2==0)],["PSYCH"],[0])
+        dt.set_cells_unavailable([d for d in range(dt.num_days) if not(d%2==0)],["PSYCH"],[0])
         # dt.set_cells_unentry(unentry_ws=["PSYCH","ART","ART2"])
-        dt.set_cells_unentry(unentry_ws=["PSYCH","ART"])
-        dt.set_cells_unentry([d for d in range(dt.num_days) if not(dt.is_weekend(d) or d in dt.holiday_dates_indexes)],["MDR"])
+        dt.set_cells_unentry(unentry_ws=["PSYCH","ART","MDR"])
+        dt.set_cells_unentry([d for d in range(dt.num_days) if not(dt.is_weekend(d) or d in dt.holiday_dates_indexes)],["IMW"],[1])
+        
+        # dt.set_cells_unentry([d for d in range(dt.num_days) if dt.is_weekend(d) or d in dt.holiday_dates_indexes],["MDR_2"])
         # dt.set_cells_unentry(unentry_ws=["W9"],unentry_ts=[1])
         # dt.set_cells_unentry(unentry_ds=[d for d in range(dt.num_days) if (dt.is_weekend(d) or d in dt.holiday_dates_indexes)], unentry_ws=["W4M","W4F"],unentry_ts=[1])
         # dt.set_cells_unentry(unentry_ds=[d for d in range(dt.num_days) if dt.is_weekend(d) or d in dt.holiday_dates_indexes],unentry_ws=["W4M","W4F"],unentry_ts=[1])
@@ -750,7 +799,7 @@ if __name__ == "__main__":
         dt.add_on_prev_duty(-1,[14,8,6,3,9])
         dt.add_on_prev_duty(-2,[7,13,1,11,10])
         dt.rule_skip_prev_duty(1)
-    dt.add_on_basic_rules(handle_prev_duty)
+    # dt.add_on_basic_rules(handle_prev_duty)
     def handle_ART_rule(if_first_day_gp_pick:list=[],ART_possible_wards:list=dt.all_wards,tt_list:list=[tt for tt in range(dt.gp_alloc_per_ward)]): #["W4M","W4F","W9"]
         for d in range(dt.num_days):
             if dt.is_weekend(d):
@@ -764,7 +813,7 @@ if __name__ == "__main__":
                         pddgv = dt.get_model().new_bool_var(f"prev_gp{gp}_d{one_day_back}_ForART")
                         dt.get_model().add_bool_or(prev_day_gp_duty_values).only_enforce_if(pddgv)
                         dt.get_model().add(sum(dt.get_available_cell_value(gp,d,'ART',tt) for tt in [0])==0).only_enforce_if(pddgv.Not()) #can use tt_list for all values if you want
-    dt.add_on_basic_rules(handle_ART_rule,[1,7],["W4M","W4F","W9"])
+    # dt.add_on_basic_rules(handle_ART_rule,[1,7],["W4M","W4F","W9"])
     # dt.add_on_unattainable(test,"y")
     # dt.run_unattainable()
     def handle_free_days_after_duty():
@@ -780,13 +829,41 @@ if __name__ == "__main__":
         # pass
         dt.skip_duty_all(2,[d for d in range(9)],True)
         dt.skip_duty_all(4,[1,2])
-        dt.skip_duty(11,[1,23,28])
+        dt.skip_duty(11,[1,8,23,28])
         dt.skip_duty(1,[1])
         dt.skip_duty(0,[1])
         dt.add_not_eff_gps([2])
-
+        dt.set_cell_values([
+            (13,0,"W4M",0),(12,0,"W4F",0),(10,0,"W9",0),(14,0,"MDR",0),(7,0,"IMW",0),(5,0,"IMW",1),(1,0,"ART",0),(11,0,"ART",1),
+            (11,1,"W4M",0),(9,1,"W4F",0),(8,1,"W9",0),(6,1,"MDR",0),(13,1,"MDR",1),(1,1,"IMW",0),(5,1,"IMW",1),(3,1,"PSYCH",1),
+            (14,2,"W4M",0),(6,2,"W4F",0),(3,2,"W9",0),(11,2,"MDR",0),(8,2,"MDR",1),(4,2,"IMW",0),(13,2,"IMW",1),
+            (7,3,"W4M",0),(5,3,"W4F",0),(10,3,"W9",0),(13,3,"MDR",0),(11,3,"MDR",1),(12,3,"IMW",0),(14,3,"IMW",1),(4,3,"PSYCH",1),
+            # (9,4,"W4M",0),(13,4,"W4F",0),(11,4,"W9",0)                              ,(0,4,"IMW",0),
+        ])
+        # dt.entry_duty(13,[1],ews=["W4M"],ets=[0])
+        # dt.entry_duty(12,[1],ews=["W4F"],ets=[0])
+        # dt.entry_duty(10,[1],ews=["W9"],ets=[0])
+        # dt.entry_duty(7,[1],ews=["IMW"],ets=[0])
+        # dt.entry_duty(5,[1],ews=["IMW"],ets=[1])
+        # dt.set_duty_status(5,[1],"MDR",0,True)
+        # dt.set_duty_status(1,[1],"ART",0,True)
+        # dt.set_duty_status(11,[1],"ART",1,True)
+        # dt.set_duty_status(11,[1],"ART2",0,True)
+        # dt.get_model().add(dt.get_cell_value(1,0,"ART",0)==1)
+        # dt.get_model().add(dt.get_cell_value(11,0,"ART2",0)==1)
+        # dt.entry_duty(1,[1],ews=["ART"])
+        # dt.entry_duty(11,[1],ews=["ART2"])
         # dt.add_extra_eff_gps([gp for gp in range(dt.num_gps) if not(gp in [2,11,8,7,4,1])])
     dt.add_on_added_rules(handle_personal_pref_added)
+
+    def handle_wd_we_art_nums():
+        def opt_we_h_non_art_count_logic(gp,cal_per_gp):
+            we_h_non_art_value_per_gp = (dt.get_available_cell_value(gp,d,w,t,0) for d in range(dt.num_days) for w in dt.all_wards for t in range(dt.gp_alloc_per_ward) if (dt.is_weekend(d) or d in dt.holiday_dates_indexes) and not(w in ["ART"]))
+            dt.get_model().add(cal_per_gp==sum(we_h_non_art_value_per_gp))
+        max_we_h_non_art,min_we_h_non_art,cal_we_h_non_art = dt.max_min_opt_per_gp_helper('we_h_non_art_count',dt.num_days,opt_we_h_non_art_count_logic)
+        dt.add_on_diff_weighted_values(max_we_h_non_art,min_we_h_non_art,8)
+        dt.add_displayable_values([max_we_h_non_art,min_we_h_non_art])
+        dt.add_displayable_per_gp_value_dict([cal_we_h_non_art])
 
     def handle_gp_separation():
         dt.make_two_gps_apart([ #day time same shift
@@ -820,22 +897,30 @@ if __name__ == "__main__":
         dt.add_displayable_per_gp_value_dict([cal_gp_imw_num,cal_gp_imw_we_hol_num])
 
     def handle_personal_pref_optimization():
-        
-        max_set_hr = 212
-        hr_diff_from_max_hr_set = dt.get_model().new_int_var(0,24*dt.num_days,f'hr_difference_from_max_hr_set')
-        dt.get_model().add_abs_equality(hr_diff_from_max_hr_set,max_set_hr-dt.min_hr)
-        dt.add_displayable_values([hr_diff_from_max_hr_set])
-        dt.add_on_weighted_values(hr_diff_from_max_hr_set,10)
-        dt.add_on_diff_weighted_values(dt.max_entry_eff_hr,dt.min_entry_eff_hr,10)
-        dt.add_on_diff_weighted_values(dt.max_entry_hr,dt.min_entry_hr,5)
-        # dt.get_model().add(dt.max_hr<=212)
+        # pass
+        # dt.get_model().add(dt.max_duty_total_count_num==15)
+        dt.get_model().add(dt.min_duty_total_count_num>=15)
+        # dt.get_model().add(dt.max_duty_count_we_h_num==15)
+        dt.get_model().add(dt.min_duty_count_we_h_num>=4)
+        dt.get_model().add(dt.min_mul_hr>=348*dt.adjuster)
+        # max_set_hr = 212
+        # hr_diff_from_max_hr_set = dt.get_model().new_int_var(0,24*dt.num_days,f'hr_difference_from_max_hr_set')
+        # dt.get_model().add_abs_equality(hr_diff_from_max_hr_set,max_set_hr-dt.max_hr)
+        # dt.add_displayable_values([hr_diff_from_max_hr_set])
+        # dt.add_on_weighted_values(hr_diff_from_max_hr_set,10)
+        # dt.add_on_diff_weighted_values(dt.max_entry_hr,dt.min_entry_hr,2)
+        # dt.add_on_diff_weighted_values(dt.max_mul_hr,dt.min_mul_hr,5)
+        # dt.add_on_diff_weighted_values(dt.max_entry_eff_hr,dt.min_entry_eff_hr,10)
+        # dt.add_on_diff_weighted_values(dt.max_mul_eff_hr,dt.min_mul_eff_hr,10)
+        # dt.get_model().add(dt.max_duty_count_num<=15)
+        # dt.get_model().add(dt.min_eff_hr>=212)
         #gp11 stabilizer
         # dt.get_model().add(dt.cal_gp_weekend_hol_num[11]==dt.min_weekend_hol_num)
         # dt.get_model().add(dt.cal_gp_entry_eff_hr[11]==dt.min_entry_eff_hr)
         #off gps stabilizer
         # dt.get_model().add(dt.cal_gp_hr[2]<=dt.min_eff_hr-48)
-        dt.get_model().add(3*dt.cal_gp_hr[2]>=2*dt.min_eff_hr)
-        dt.get_model().add(6*dt.cal_gp_hr[2]<=5*dt.min_eff_hr)
+        # dt.get_model().add(3*dt.cal_gp_hr[2]>=2*dt.min_eff_hr)
+        # dt.get_model().add(6*dt.cal_gp_hr[2]<=5*dt.min_eff_hr)
         # dt.get_model().add(3*dt.cal_gp_hr[4]>=2*dt.min_eff_hr)
         # dt.get_model().add(6*dt.cal_gp_hr[4]<=5*dt.min_eff_hr)
         # dt.get_model().add(3*dt.cal_gp_entry_hr[2]>=2*dt.min_entry_eff_hr)
@@ -846,12 +931,13 @@ if __name__ == "__main__":
         #eff hour stabilizer
         # dt.get_model().add(dt.min_eff_hr>=306)
         # dt.get_model().add(dt.max_eff_hr-dt.min_eff_hr<=7)
-        dt.get_model().add(dt.max_entry_eff_hr-dt.min_entry_eff_hr<=8)
+        # dt.get_model().add(dt.max_entry_eff_hr-dt.min_entry_eff_hr<=15)
         #weekend stabilizer
         # dt.get_model().add(dt.max_weekend_hol_num<=4)
         # dt.get_model().add(dt.max_weekend_hol_num-dt.min_weekend_hol_num==1)
     
     dt.add_on_optimizers(handle_gp_separation)
+    dt.add_on_optimizers(handle_wd_we_art_nums)
     dt.add_on_optimizers(handle_imw_diff)
     dt.add_on_optimizers(handle_personal_pref_optimization)
     dt.add_on_optimizers(dt.use_minimize_model)
@@ -863,6 +949,6 @@ if __name__ == "__main__":
         csv_decision = input("Do you want to create a CSV?[Y,N]").strip().lower()
         if csv_decision == 'y':
             print(dt.check_hrs_values(result,create_csv=True))
-            # dt.create_csv_ward_based(result)
+            dt.create_csv_ward_based(result)
         else:
             sys.exit()
